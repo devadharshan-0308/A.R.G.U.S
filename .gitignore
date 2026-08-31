@@ -1,0 +1,17 @@
+venv/
+__pycache__/
+*.pyc
+.env
+models/*.pt
+models/*.onnx
+models/*.engine
+data/app.db
+data/evidence/
+data/output/
+node_modules/
+frontend/node_modules/
+frontend/dist/
+dist/
+.vscode/
+.idea/
+

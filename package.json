@@ -1,0 +1,11 @@
+{
+  "name": "smart-city-ingestion-layer",
+  "version": "1.0.0",
+  "description": "Smart City Ingestion, Pothole Deduplication, and Command Center Dashboard",
+  "scripts": {
+    "dev": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "server": "python server.py",
+    "pipeline": "python main.py --skip 1 --input data/input/demo_traffic.mp4 --enable-potholes"
+  }
+}
