@@ -21,11 +21,13 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from src.ingestion import video_frame_generator
 from src.yolo_detector import TrafficYOLODetector
-from src.pothole_detector import PotholeDetector, SEVERITY_COLORS
+from src.hazard_detector import RoadHazardDetector as PotholeDetector
+from src.pothole_detector import SEVERITY_COLORS
 from src.spatial_dedup import SpatialPotholeDeduplicator
 from src.rule_engine import SafetyRuleEngine
 from src.plate_detector import LicensePlateDetector
 from src.maps_enricher import MapsEnricher
+from src.road_infra_detector import RoadInfrastructureDetector
 import base64
 import requests
 
@@ -146,12 +148,12 @@ def parse_args():
                 return p
         return os.path.join("models", base + ".pt")  # fallback (will auto-download)
 
-    parser.add_argument("--model", default=_best_model("yolov8s"),
+    parser.add_argument("--model", default=_best_model("yolo11s"),
                         help="Path to YOLO model file (.engine/.onnx/.pt) (default: best available)")
     parser.add_argument("--skip", type=int, default=3,
                         help="Frame skip rate - process 1 every N frames (default: 3)")
-    parser.add_argument("--conf", type=float, default=0.45,
-                        help="YOLO detection confidence threshold (default: 0.45)")
+    parser.add_argument("--conf", type=float, default=0.25,
+                        help="YOLO detection confidence threshold (default: 0.25)")
     parser.add_argument("--res-width", type=int, default=480,
                         help="Output video width resolution (default: 480p)")
     parser.add_argument("--no-preview", action="store_true",
@@ -198,7 +200,7 @@ def main(args=None):
     # 2. Initialize Models
     logger.info("--- STEP 1: INITIALIZING AI MODELS ---")
     traffic_detector = TrafficYOLODetector(
-        model_path=args.model,
+        model_name=args.model,
         conf_threshold=args.conf
     )
 
@@ -238,6 +240,7 @@ def main(args=None):
     if not args.no_maps:
         maps_enricher = MapsEnricher()
     backend_pusher = AsyncBackendPusher(endpoint_url=args.backend_url)
+    infra_detector = RoadInfrastructureDetector()
 
     out_writer = None
     all_detection_logs = []
@@ -425,6 +428,17 @@ def main(args=None):
                         image_crop=v_crop
                     )
 
+            # Step 3.5: Road Infrastructure Deficiencies (Dividers, Zebra Crossings, Waterlogging, Signboards)
+            infra_res = infra_detector.analyze(
+                packet["image"],
+                vehicle_detections=traffic_event.get("detections", {}).get("vehicles", []),
+                pedestrian_detections=traffic_event.get("detections", {}).get("pedestrians", []),
+                is_school_zone=is_school,
+                is_hospital_zone=is_hosp
+            )
+            infra_defects = infra_res.get("defects", [])
+            annotated_frame = infra_detector.annotate(annotated_frame, infra_defects)
+
             # Draw HIGH_PRIORITY banner on annotated frame
             if rule_result["alert_level"] == "HIGH_PRIORITY":
                 cv2.rectangle(annotated_frame, (10, 55), (w - 10, 90), (0, 0, 200), -1)
@@ -439,6 +453,7 @@ def main(args=None):
                 "pedestrians": traffic_event["detections"]["pedestrians"],
                 "vehicles": traffic_event["detections"]["vehicles"],
                 "rule_engine": rule_result,
+                "infra_defects": infra_defects,
             }
 
             if pothole_detector is not None:
@@ -453,7 +468,9 @@ def main(args=None):
             # Detailed vehicle breakdown string
             bd = counts.get("breakdown", {})
             bd_parts = [format_label(k, v) for k, v in bd.items() if v > 0]
-            bd_str = " | ".join(bd_parts) if bd_parts else f"Vehicles: {counts['vehicles']}"
+            total_vehs = counts.get("total_vehicles", counts.get("vehicles", 0))
+            peds_count = counts.get("pedestrians", 0)
+            bd_str = " | ".join(bd_parts) if bd_parts else f"Vehicles: {total_vehs}"
 
             # Dashboard text overlay
             pothole_hud = ""
@@ -470,7 +487,7 @@ def main(args=None):
                 plate_labels = [p.get("plate_text") or f"Plate:{p['confidence']*100:.0f}%" for p in detected_plates]
                 plate_hud = f" | Plates: {len(detected_plates)} [{', '.join(plate_labels)}]"
 
-            status_text = f"Frame {frame_id:03d} ({ts:4.1f}s) | Pedestrians: {counts['pedestrians']} | {bd_str}{pothole_hud}{plate_hud}"
+            status_text = f"Frame {frame_id:03d} ({ts:4.1f}s) | Pedestrians: {peds_count} | {bd_str}{pothole_hud}{plate_hud}"
             cv2.rectangle(annotated_frame, (10, 10), (w - 10, 50), (20, 20, 20), -1)
             cv2.putText(annotated_frame, status_text, (20, 38), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.50, (0, 255, 255), 2)
@@ -497,8 +514,8 @@ def main(args=None):
                 is_school=is_school,
                 is_hosp=is_hosp,
                 payload={
-                    "total_vehicles": counts["vehicles"],
-                    "pedestrians": counts["pedestrians"],
+                    "total_vehicles": total_vehs,
+                    "pedestrians": peds_count,
                     "cars": bd.get("car", 0),
                     "motorcycles": bd.get("motorcycle", 0),
                     "buses": bd.get("bus", 0),
@@ -507,8 +524,8 @@ def main(args=None):
             )
 
             # Log to console if anything detected
-            if counts["pedestrians"] > 0 or counts["vehicles"] > 0 or (pothole_counts.get("total", 0) > 0) or detected_plates:
-                logger.info(f"[Frame {frame_id:04d} | {ts:05.2f}s] Pedestrians: {counts['pedestrians']} | {bd_str}{pothole_hud}{plate_hud}")
+            if peds_count > 0 or total_vehs > 0 or (pothole_counts.get("total", 0) > 0) or detected_plates:
+                logger.info(f"[Frame {frame_id:04d} | {ts:05.2f}s] Pedestrians: {peds_count} | {bd_str}{pothole_hud}{plate_hud}")
 
             out_writer.write(output_frame)
 
@@ -548,6 +565,30 @@ def main(args=None):
             with open(args.json_output, "w") as f:
                 json.dump(output_data, f, indent=2)
 
+        # Export Official Municipal PWD Civil Maintenance Work-Orders
+        pwd_summary_info = None
+        if spatial_deduplicator is not None and spatial_deduplicator.get_unique_potholes():
+            try:
+                from src.pwd_workorder import generate_pwd_work_orders
+                pothole_incidents = [
+                    {
+                        "type": "POTHOLE",
+                        "id": f"POT-{p['id']}",
+                        "title": f"{p['severity'].title()}",
+                        "severity": "CRITICAL" if "severe" in p['severity'] else ("WARNING" if "mild" in p['severity'] else "INFO"),
+                        "gps": f"{p['lat']:.5f}, {p['lon']:.5f}",
+                        "lat": p['lat'],
+                        "lon": p['lon'],
+                        "confidence": f"{p['confidence']*100:.0f}%",
+                        "location": "Surveyed Transit Corridor"
+                    }
+                    for p in spatial_deduplicator.get_unique_potholes()
+                ]
+                csv_file, pwd_sum = generate_pwd_work_orders(pothole_incidents)
+                pwd_summary_info = (csv_file, pwd_sum)
+            except Exception as e:
+                logger.warning(f"Could not generate PWD work-orders: {e}")
+
     elapsed = time.time() - start_time
     fps = total_processed / elapsed if elapsed > 0 else 0
     logger.info("")
@@ -561,6 +602,9 @@ def main(args=None):
     if spatial_deduplicator is not None:
         summary = spatial_deduplicator.get_summary()
         logger.info(f"Unique Potholes  : {summary['total_unique_potholes']} (Threshold: {args.pothole_dist_thresh}m)")
+    if pwd_summary_info:
+        csv_file, pwd_sum = pwd_summary_info
+        logger.info(f"PWD Work-Orders  : {csv_file} ({pwd_sum['total_orders']} orders, Est: INR {pwd_sum['total_budget_inr']:,})")
     logger.info("=" * 50)
 
 if __name__ == "__main__":

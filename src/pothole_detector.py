@@ -42,6 +42,7 @@ def _download_pothole_model(local_path: str) -> bool:
     Returns True on success, False on failure.
     """
     try:
+        # pyrefly: ignore [missing-import]
         from huggingface_hub import hf_hub_download
         logger.info(f"Downloading pothole model from HuggingFace ({DEFAULT_HF_REPO}/{DEFAULT_HF_FILE})...")
         cached_path = hf_hub_download(

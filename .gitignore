@@ -14,4 +14,7 @@ frontend/dist/
 dist/
 .vscode/
 .idea/
+.agents/
+skills-lock.json
+*.zip
 

@@ -39,11 +39,13 @@ def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
 
 class PotholeIncident:
     """
-    Represents a unique physical pothole identified on a map coordinate.
+    Represents a unique physical road hazard (pothole, barricade, water logging) identified on a map coordinate.
     """
     def __init__(self, pothole_id: int, lat: float, lon: float, severity: str,
-                 confidence: float, timestamp_sec: float, frame_id: int, bbox: Optional[List[float]] = None):
+                 confidence: float, timestamp_sec: float, frame_id: int, bbox: Optional[List[float]] = None,
+                 hazard_type: str = "pothole"):
         self.pothole_id = pothole_id
+        self.hazard_type = hazard_type
         self.latitude = lat
         self.longitude = lon
         self.severity = severity.strip().lower()
@@ -59,7 +61,7 @@ class PotholeIncident:
                         confidence: float, timestamp_sec: float, frame_id: int,
                         bbox: Optional[List[float]] = None):
         """
-        Merges a subsequent frame detection of the same physical pothole.
+        Merges a subsequent frame detection of the same physical hazard.
         Updates coordinates with a running weighted average, elevates severity if higher,
         and records timestamps.
         """
@@ -86,6 +88,7 @@ class PotholeIncident:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "pothole_id": self.pothole_id,
+            "hazard_type": self.hazard_type,
             "latitude": self.latitude,
             "longitude": self.longitude,
             "severity": self.severity,
@@ -101,7 +104,8 @@ class PotholeIncident:
 
 class SpatialPotholeDeduplicator:
     """
-    Deduplicates rapid-fire frame detections of potholes using Haversine distance threshold.
+    Deduplicates rapid-fire frame detections of road hazards (potholes, barricades, water logging)
+    using Haversine distance threshold.
     Groups detections within the threshold distance (default: 2.5 meters) into a single map incident.
     """
     def __init__(self, distance_threshold_meters: float = 2.5):
@@ -111,23 +115,26 @@ class SpatialPotholeDeduplicator:
 
     def add_or_merge(self, lat: float, lon: float, severity: str,
                      confidence: float, timestamp_sec: float, frame_id: int,
-                     bbox: Optional[List[float]] = None) -> Tuple[PotholeIncident, bool]:
+                     bbox: Optional[List[float]] = None,
+                     hazard_type: str = "pothole") -> Tuple[PotholeIncident, bool]:
         """
-        Check if detection matches an existing pothole within distance_threshold_meters.
+        Check if detection matches an existing hazard of the same type within distance_threshold_meters.
         Returns:
-            (incident, is_new): Incident object and boolean indicating whether a new pothole was registered.
+            (incident, is_new): Incident object and boolean indicating whether a new hazard was registered.
         """
         closest_incident: Optional[PotholeIncident] = None
         min_dist = float('inf')
 
         for inc in self.incidents:
+            if getattr(inc, "hazard_type", "pothole") != hazard_type:
+                continue
             dist = haversine_distance(lat, lon, inc.latitude, inc.longitude)
             if dist < min_dist:
                 min_dist = dist
                 closest_incident = inc
 
         if closest_incident is not None and min_dist <= self.distance_threshold:
-            # Merge into existing pothole incident
+            # Merge into existing hazard incident
             closest_incident.merge_detection(
                 lat=lat,
                 lon=lon,
@@ -139,7 +146,7 @@ class SpatialPotholeDeduplicator:
             )
             return closest_incident, False
         else:
-            # Register new unique physical pothole
+            # Register new unique physical hazard
             new_inc = PotholeIncident(
                 pothole_id=self._next_id,
                 lat=lat,
@@ -148,20 +155,18 @@ class SpatialPotholeDeduplicator:
                 confidence=confidence,
                 timestamp_sec=timestamp_sec,
                 frame_id=frame_id,
-                bbox=bbox
+                bbox=bbox,
+                hazard_type=hazard_type
             )
             self._next_id += 1
             self.incidents.append(new_inc)
             logger.info(
-                f"[Spatial Dedup] New unique pothole #{new_inc.pothole_id} ({new_inc.severity}) "
+                f"[Spatial Dedup] New unique {hazard_type} #{new_inc.pothole_id} ({new_inc.severity}) "
                 f"registered at ({lat:.6f}, {lon:.6f}) on frame {frame_id}"
             )
             return new_inc, True
 
     def get_unique_potholes(self) -> List[Dict[str, Any]]:
-        """
-        Returns a list of all deduplicated pothole incidents formatted as dictionaries.
-        """
         return [inc.to_dict() for inc in self.incidents]
 
     def get_summary(self) -> Dict[str, Any]:
@@ -181,3 +186,6 @@ class SpatialPotholeDeduplicator:
             "breakdown": breakdown,
             "distance_threshold_meters": self.distance_threshold
         }
+
+
+SpatialHazardDeduplicator = SpatialPotholeDeduplicator

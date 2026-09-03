@@ -43,9 +43,9 @@ os.makedirs(EVIDENCE_DIR, exist_ok=True)
 init_db()
 
 app = FastAPI(
-    title="Smart City Traffic & Pothole Ingestion API",
-    description="Backend API with Maps MCP enrichment, SQLite storage, and Live WebSockets",
-    version="1.0.0"
+    title="ARGUS // Municipal Fleet Sensing & Infrastructure Intelligence API",
+    description="The Hundred Eyes of the City — Backend API with SQLite storage, Live WebSockets, and PWD Work-Orders",
+    version="2.0.0"
 )
 
 # CORS Setup (Allow frontend dashboards to connect seamlessly)
@@ -57,8 +57,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve Evidence Image Crops
+# Serve Evidence Image Crops & Input/Output Videos
+DATA_DIR = "data"
+os.makedirs(os.path.join(DATA_DIR, "input"), exist_ok=True)
+os.makedirs(os.path.join(DATA_DIR, "output"), exist_ok=True)
 app.mount("/evidence", StaticFiles(directory=EVIDENCE_DIR), name="evidence")
+app.mount("/data", StaticFiles(directory=DATA_DIR), name="data")
+
 
 
 # ─── WEBSOCKET CONNECTION MANAGER ───────────────────────────────────────────
@@ -131,9 +136,34 @@ def list_plates(
 ):
     return get_all_plates(search_text=q, limit=limit)
 
-@app.get("/api/metrics")
-def list_metrics(limit: int = 100):
-    return get_recent_metrics(limit=limit)
+@app.get("/api/videos")
+def list_videos():
+    input_dir = os.path.join("data", "input")
+    output_dir = os.path.join("data", "output")
+    
+    videos = []
+    if os.path.exists(input_dir):
+        for f in os.listdir(input_dir):
+            if f.lower().endswith(('.mp4', '.avi', '.mov', '.mkv')):
+                f_path = os.path.join(input_dir, f)
+                videos.append({
+                    "name": f,
+                    "type": "input",
+                    "url": f"/data/input/{f}",
+                    "size_mb": round(os.path.getsize(f_path) / (1024 * 1024), 2)
+                })
+    if os.path.exists(output_dir):
+        for f in os.listdir(output_dir):
+            if f.lower().endswith(('.mp4', '.avi', '.mov', '.mkv')):
+                f_path = os.path.join(output_dir, f)
+                videos.append({
+                    "name": f,
+                    "type": "output",
+                    "url": f"/data/output/{f}",
+                    "size_mb": round(os.path.getsize(f_path) / (1024 * 1024), 2)
+                })
+    return videos
+
 
 
 # ─── LIVE EVENT RECEIVER & WEBSOCKET BROADCAST ──────────────────────────────
@@ -203,6 +233,57 @@ async def ingest_event(event: IngestionEvent):
     return {"status": "SUCCESS", "event_type": event.event_type}
 
 
+# ─── LIVE AI PIPELINE TRIGGER ENDPOINTS ──────────────────────────────────────
+pipeline_state = {
+    "is_running": False,
+    "current_video": None,
+    "exit_code": None,
+    "last_run": None
+}
+
+class PipelineRunRequest(BaseModel):
+    video_name: str = "pothole.mp4"
+    enable_potholes: bool = True
+
+@app.get("/api/pipeline/status")
+def get_pipeline_status():
+    return pipeline_state
+
+@app.post("/api/pipeline/run")
+def trigger_pipeline(req: PipelineRunRequest):
+    import subprocess
+    import threading
+
+    if pipeline_state["is_running"]:
+        return {"status": "ALREADY_RUNNING", "message": "Pipeline is currently processing another video."}
+    
+    input_path = os.path.join("data", "input", req.video_name)
+    if not os.path.exists(input_path):
+        return {"status": "ERROR", "message": f"Video '{req.video_name}' not found in data/input/ directory."}
+
+    def run_worker():
+        pipeline_state["is_running"] = True
+        pipeline_state["current_video"] = req.video_name
+        try:
+            cmd = ["python", "src/main.py", "--input", input_path, "--no-preview"]
+            if req.enable_potholes:
+                cmd.append("--enable-potholes")
+            
+            logger.info(f"Triggering AI Pipeline via UI: {' '.join(cmd)}")
+            res = subprocess.run(cmd, check=False)
+            pipeline_state["exit_code"] = res.returncode
+        except Exception as e:
+            logger.error(f"Pipeline execution error: {e}")
+        finally:
+            pipeline_state["is_running"] = False
+            pipeline_state["last_run"] = req.video_name
+
+    thread = threading.Thread(target=run_worker, daemon=True)
+    thread.start()
+
+    return {"status": "STARTED", "video": req.video_name, "message": f"AI Pipeline started for {req.video_name}"}
+
+
 @app.websocket("/ws/live")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
@@ -212,3 +293,73 @@ async def websocket_endpoint(websocket: WebSocket):
             _ = await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+
+
+# ─── PWD MUNICIPAL CIVIL WORK-ORDER ENDPOINTS ────────────────────────────────
+@app.get("/api/pwd/work-orders")
+def get_pwd_work_orders():
+    """
+    Returns the latest PWD civil repair work-order docket, budget summary,
+    and items parsed directly from the most recent generated CSV docket.
+    """
+    import csv
+    output_dir = os.path.join("data", "output")
+    if not os.path.exists(output_dir):
+        return {"status": "EMPTY", "total_orders": 0, "total_budget_inr": 0, "orders": []}
+
+    csv_files = [f for f in os.listdir(output_dir) if f.startswith("PWD_WORK_ORDER_") and f.endswith(".csv")]
+    if not csv_files:
+        return {"status": "EMPTY", "total_orders": 0, "total_budget_inr": 0, "orders": []}
+
+    csv_files.sort(reverse=True)
+    latest_csv = csv_files[0]
+    csv_path = os.path.join(output_dir, latest_csv)
+
+    orders = []
+    total_budget = 0
+    prios = {"P1 - CRITICAL": 0, "P2 - HIGH": 0, "P3 - MEDIUM": 0}
+
+    try:
+        with open(csv_path, "r", encoding="utf-8", errors="replace") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                cost = int(row.get("Estimated_Cost_INR", 0) or 0)
+                sev = row.get("Severity", "P3 - MEDIUM")
+                prios[sev] = prios.get(sev, 0) + 1
+                total_budget += cost
+                orders.append(row)
+    except Exception as e:
+        logger.warning(f"Error reading CSV docket: {e}")
+
+    return {
+        "status": "SUCCESS",
+        "csv_filename": latest_csv,
+        "csv_url": f"/data/output/{latest_csv}",
+        "total_orders": len(orders),
+        "total_budget_inr": total_budget,
+        "total_budget_formatted": f"₹{total_budget:,} INR",
+        "priority_breakdown": prios,
+        "orders": orders
+    }
+
+
+@app.post("/api/pwd/dispatch")
+def dispatch_pwd_docket():
+    """
+    Triggers the direct native email dispatch of the latest PWD work-order docket
+    and CSV spreadsheet to municipal engineering authorities.
+    """
+    from src.email_dispatcher import send_pwd_workorder_email
+
+    summary_data = get_pwd_work_orders()
+    if summary_data.get("total_orders", 0) == 0:
+        return {"status": "ERROR", "message": "No active PWD work orders available to dispatch."}
+
+    csv_path = os.path.join("data", "output", summary_data["csv_filename"])
+    ok, msg = send_pwd_workorder_email(summary_data, csv_path)
+    return {
+        "status": "SUCCESS" if ok else "ERROR",
+        "message": msg
+    }
+
+
