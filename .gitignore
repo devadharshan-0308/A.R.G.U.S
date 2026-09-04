@@ -17,4 +17,6 @@ dist/
 .agents/
 skills-lock.json
 *.zip
+.env.*
+!.env.example
 
