@@ -1,0 +1,8 @@
+CORRIDOR ID: bus10
+ROUTE: Route 598 (Central <-> ECR Night Shuttle)
+CORRIDOR NAME: East Coast Scenic Corridor
+STREET NAME: East Coast Road (ECR)
+WAYPOINTS: 29
+
+INSTRUCTIONS: Drop your route video files (.mp4, .avi, .mov, .mkv) in this directory.
+The application will automatically detect and load videos placed here.

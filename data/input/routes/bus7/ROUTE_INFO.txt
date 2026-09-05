@@ -1,0 +1,8 @@
+CORRIDOR ID: bus7
+ROUTE: Route 114 (Red Hills <-> Ambattur Bypass)
+CORRIDOR NAME: Ambattur Industrial Corridor
+STREET NAME: Ambattur Industrial Estate Road
+WAYPOINTS: 37
+
+INSTRUCTIONS: Drop your route video files (.mp4, .avi, .mov, .mkv) in this directory.
+The application will automatically detect and load videos placed here.

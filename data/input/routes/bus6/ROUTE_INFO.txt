@@ -1,0 +1,8 @@
+CORRIDOR ID: bus6
+ROUTE: Route 19B (T. Nagar <-> Kelambakkam)
+CORRIDOR NAME: Anna University Institutional Corridor
+STREET NAME: Sardar Patel Road
+WAYPOINTS: 32
+
+INSTRUCTIONS: Drop your route video files (.mp4, .avi, .mov, .mkv) in this directory.
+The application will automatically detect and load videos placed here.

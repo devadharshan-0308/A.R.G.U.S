@@ -1,0 +1,8 @@
+CORRIDOR ID: bus5
+ROUTE: Route 21G (Broadway <-> Tambaram)
+CORRIDOR NAME: Marina Coastal Boulevard
+STREET NAME: Kamarajar Salai
+WAYPOINTS: 8
+
+INSTRUCTIONS: Drop your route video files (.mp4, .avi, .mov, .mkv) in this directory.
+The application will automatically detect and load videos placed here.

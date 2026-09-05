@@ -1,0 +1,8 @@
+CORRIDOR ID: bus2
+ROUTE: Route 70V (Kilambakkam <-> Vadapalani)
+CORRIDOR NAME: Jawaharlal Nehru Road Corridor
+STREET NAME: Inner Ring Road / 100 Feet Rd
+WAYPOINTS: 35
+
+INSTRUCTIONS: Drop your route video files (.mp4, .avi, .mov, .mkv) in this directory.
+The application will automatically detect and load videos placed here.

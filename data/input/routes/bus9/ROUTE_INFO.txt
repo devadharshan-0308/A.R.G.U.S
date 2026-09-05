@@ -1,0 +1,8 @@
+CORRIDOR ID: bus9
+ROUTE: Route 23C (Ayanavaram <-> Adyar Depot)
+CORRIDOR NAME: Mount Road Downtown Spine
+STREET NAME: Anna Salai
+WAYPOINTS: 93
+
+INSTRUCTIONS: Drop your route video files (.mp4, .avi, .mov, .mkv) in this directory.
+The application will automatically detect and load videos placed here.

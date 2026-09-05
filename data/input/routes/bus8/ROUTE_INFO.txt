@@ -1,0 +1,8 @@
+CORRIDOR ID: bus8
+ROUTE: Route 1B (Thiruvottiyur <-> Royapuram)
+CORRIDOR NAME: North Port Freight Expressway
+STREET NAME: Ennore Express Road
+WAYPOINTS: 18
+
+INSTRUCTIONS: Drop your route video files (.mp4, .avi, .mov, .mkv) in this directory.
+The application will automatically detect and load videos placed here.

@@ -1,0 +1,8 @@
+CORRIDOR ID: bus4
+ROUTE: Route 29C (Perambur <-> Besant Nagar)
+CORRIDOR NAME: Nungambakkam Arterial Link
+STREET NAME: Nungambakkam High Road
+WAYPOINTS: 45
+
+INSTRUCTIONS: Drop your route video files (.mp4, .avi, .mov, .mkv) in this directory.
+The application will automatically detect and load videos placed here.
